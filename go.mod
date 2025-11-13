@@ -3,6 +3,7 @@ module surge
 go 1.24.4
 
 require (
+	github.com/h2non/filetype v1.1.3
 	github.com/spf13/cobra v1.10.1
 	github.com/vfaronov/httpheader v0.1.0
 )

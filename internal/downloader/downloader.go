@@ -1,7 +1,9 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +16,8 @@ import (
 	"time"
 
 	"surge/internal/util"
+
+	"github.com/h2non/filetype"
 	"github.com/vfaronov/httpheader"
 )
 
@@ -44,11 +48,20 @@ func (d *Downloader) singleDownload(ctx context.Context, rawurl, outPath string,
 	}
 
 	if parsed.Scheme == "" {
+		if verbose {
+			fmt.Fprintln(os.Stderr, "Error: URL missing scheme (use http:// or https://)")
+		}
 		return errors.New("url missing scheme (use http:// or https://)")
 	} //if the URL does not have a scheme, return an error
 
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Initiating single download for URL: %s\n", rawurl)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawurl, nil) //We use a context so that we can cancel the download whenever we want
 	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Error creating HTTP request: %v\n", err)
+		}
 		return err
 	}
 
@@ -58,30 +71,112 @@ func (d *Downloader) singleDownload(ctx context.Context, rawurl, outPath string,
 
 	resp, err := d.Client.Do(req) //Exectes the HTTP request
 	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Error executing HTTP request: %v\n", err)
+		}
 		return err
 	}
 	defer resp.Body.Close() //Closes the response body when the function returns
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-    return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Received HTTP response with status code: %d\n", resp.StatusCode)
 	}
 
-	filename := filepath.Base(outPath)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Error: Unexpected status code: %d\n", resp.StatusCode)
+		}
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Determine the filename
+	filename := filepath.Base(parsed.Path) // Start with filename from URL path
 
 	// Try to extract filename from Content-Disposition header
 	if _, name, err := httpheader.ContentDisposition(resp.Header); err == nil && name != "" {
-    	filename = filepath.Base(name)
+		filename = filepath.Base(name)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Filename from Content-Disposition: %s\n", filename)
+		}
+	}
+
+	// Read first up to 512 bytes for sniffing. handle short reads
+	header := make([]byte, 512)
+	n, rerr := io.ReadFull(resp.Body, header)
+	if rerr != nil {
+		if rerr == io.ErrUnexpectedEOF || rerr == io.EOF {
+			// fewer than 512 bytes available but n contains what we did read
+			header = header[:n]
+		} else {
+			// real error (connection closed, etc.)
+			return fmt.Errorf("reading header: %w", rerr)
+		}
 	} else {
-		// Fallback: Use download.bin for now
+		header = header[:n]
+	}
+
+	body := io.MultiReader(bytes.NewReader(header), resp.Body)
+
+	if verbose {
+		mimeType := http.DetectContentType(header)
+		fmt.Fprintln(os.Stderr, "Detected MIME:", mimeType)
+
+		if kind, _ := filetype.Match(header); kind != filetype.Unknown {
+			fmt.Fprintln(os.Stderr, "Magic Type:", kind.Extension, kind.MIME)
+		}
+	}
+
+	// ZIP filename extraction (if applicable, override current filename)
+	if len(header) >= 4 && bytes.HasPrefix(header, []byte{0x50, 0x4B, 0x03, 0x04}) && len(header) >= 30 {
+		nameLen := int(binary.LittleEndian.Uint16(header[26:28]))
+		start := 30
+		end := start + nameLen
+		if end <= len(header) {
+			zipName := string(header[start:end])
+			if zipName != "" {
+				filename = filepath.Base(zipName) // Override filename with ZIP internal name
+				if verbose {
+					fmt.Fprintln(os.Stderr, "ZIP internal filename:", zipName)
+				}
+			}
+		}
+	}
+
+	// MIME type extension (if filename has no extension and MIME type is detectable)
+	if filepath.Ext(filename) == "" { // Only add extension if one isn't already present
+		if kind, _ := filetype.Match(header); kind != filetype.Unknown {
+			if kind.Extension != "" {
+				filename = filename + "." + kind.Extension
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Added extension from magic type: %s\n", kind.Extension)
+				}
+			}
+		}
+	}
+
+	// Final fallback: If filename is still empty or invalid
+	if filename == "" || filename == "." || filename == "/" {
 		filename = "download.bin"
+		if verbose {
+			fmt.Fprintln(os.Stderr, "Falling back to default filename: download.bin")
+		}
 	}
 
 	outDir := filepath.Dir(outPath)
-	tmpFile, err := os.CreateTemp(outDir, filename+".part.*") //Tries to create a temporary file 
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Creating temporary file in directory: %s with pattern: %s.surge\n", outDir, filename)
+	}
+	tmpFile, err := os.CreateTemp(outDir, filename+".surge") //Tries to create a temporary file
 	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Error creating temporary file: %v\n", err)
+		}
 		return err
-	}// Returns error if it fails to create temp file
+	} // Returns error if it fails to create temp file
 	tmpPath := tmpFile.Name()
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Temporary file created: %s\n", tmpPath)
+	}
 
 	defer func() {
 		tmpFile.Close()
@@ -91,38 +186,28 @@ func (d *Downloader) singleDownload(ctx context.Context, rawurl, outPath string,
 		}
 	}() //Waits until the function returns and closes the temp file and removes it if there was an error
 
-	// var total int64 = -1
-	// if cl := resp.Header.Get("Content-Length"); cl != "" {
-	// 	if v, e := strconv.ParseInt(cl, 10, 64); e == nil {
-	// 		total = v
-	// 	}
-	// }
-
-	// 
-	
 	start := time.Now()
-
-	// Copy response body to file efficiently
-	written, err := io.Copy(tmpFile, resp.Body)
+	if verbose {
+		fmt.Fprintln(os.Stderr, "Starting file copy from response body to temporary file...")
+	}
+	written, err := io.Copy(tmpFile, body) // IMPORTANT: copy from 'body', not resp.Body
 	if err != nil {
-	    return fmt.Errorf("copy failed: %w", err)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Error during file copy: %v\n", err)
+		}
+		return fmt.Errorf("copy failed: %w", err)
 	}
-	// Sync file to disk
-	if err := tmpFile.Sync(); err != nil {
-    	return err
-	}
-	if err := tmpFile.Close(); err != nil {
-    	return err
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Finished copying %d bytes to temporary file.\n", written)
 	}
 
 	elapsed := time.Since(start)
 	speed := float64(written) / 1024.0 / elapsed.Seconds() // KiB/s
 	fmt.Fprintf(os.Stderr, "\nDownloaded %s in %s (%s/s)\n",
-    	outPath,
-    	elapsed.Round(time.Second),
-    	util.ConvertBytesToHumanReadable(int64(speed*1024)),
+		outPath,
+		elapsed.Round(time.Second),
+		util.ConvertBytesToHumanReadable(int64(speed*1024)),
 	)
-
 
 	// // sync file to disk
 	// if err := tmpFile.Sync(); err != nil {
@@ -136,34 +221,57 @@ func (d *Downloader) singleDownload(ctx context.Context, rawurl, outPath string,
 	destPath := outPath
 	if info, err := os.Stat(outPath); err == nil && info.IsDir() {
 		// When outPath is a directory we must have a valid filename.
-		// The filename variable was determined earlier. It might be invalid if derived from a directory name
-		if filename == "" || filename == "." || filename == "/" {
-			// Try to get it from URL as a last resort
-			filename = filepath.Base(parsed.Path)
-			if filename == "" || filename == "." || filename == "/" {
-				return fmt.Errorf("could not determine filename to save in directory %s", outPath)
-			}
-		}
+		// The filename variable was determined earlier.
 		destPath = filepath.Join(outPath, filename)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Destination path updated to: %s (outPath was a directory)\n", destPath)
+		}
 	}
 
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Attempting to rename temporary file %s to destination %s\n", tmpPath, destPath)
+	}
 	if renameErr := os.Rename(tmpPath, destPath); renameErr != nil { //If renaming fails, we do a manual copy
-    if in, rerr := os.Open(tmpPath); rerr == nil { // Opens temp file for reading
-        defer in.Close() //Waits until function returns to close temp file
-        if out, werr := os.Create(destPath); werr == nil { //Creates destination file
-            defer out.Close() //Waits until function returns to close destination file	
-            if _, cerr := io.Copy(out, in); cerr != nil { //Tries to copy from temp to destination
-                return cerr // return the real copy error
-            }
-        } else {
-            return werr // handle file creation error
-        }
-    } else {
-        return rerr // handle file open error
-    }
-    os.Remove(tmpPath) //only remove after successful copy
-    return fmt.Errorf("rename failed: %v", renameErr) //If everything fails we say renaming the file failed
-}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Rename failed: %v. Attempting manual copy.\n", renameErr)
+		}
+		if in, rerr := os.Open(tmpPath); rerr == nil { // Opens temp file for reading
+			defer in.Close()                                   //Waits until function returns to close temp file
+			if out, werr := os.Create(destPath); werr == nil { //Creates destination file
+				defer out.Close() //Waits until function returns to close destination file
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Manually copying from %s to %s\n", tmpPath, destPath)
+				}
+				if _, cerr := io.Copy(out, in); cerr != nil { //Tries to copy from temp to destination
+					if verbose {
+						fmt.Fprintf(os.Stderr, "Error during manual copy: %v\n", cerr)
+					}
+					return cerr // return the real copy error
+				}
+				if verbose {
+					fmt.Fprintln(os.Stderr, "Manual copy successful.")
+				}
+			} else {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Error creating destination file for manual copy: %v\n", werr)
+				}
+				return werr // handle file creation error
+			}
+		} else {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Error opening temporary file for manual copy: %v\n", rerr)
+			}
+			return rerr // handle file open error
+		}
+		os.Remove(tmpPath) //only remove after successful copy
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Removed temporary file: %s\n", tmpPath)
+		}
+		return fmt.Errorf("rename failed: %v", renameErr) //If everything fails we say renaming the file failed
+	}
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Successfully renamed %s to %s\n", tmpPath, destPath)
+	}
 
 	return nil
 }
