@@ -34,11 +34,3 @@ type DownloadStartedMsg struct {
 	Filename   string
 	Total      int64
 }
-
-// AddDownloadMsg is a command to start a new download
-type AddDownloadMsg struct {
-	URL string
-}
-
-// TickMsg is sent periodically to update the UI
-type TickMsg struct{}

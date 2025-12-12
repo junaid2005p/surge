@@ -17,27 +17,23 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case messages.DownloadStartedMsg:
-		// Check if download already exists (by ID)
-		var target *DownloadModel
+		// Find the download and update with real metadata + start polling
 		for _, d := range m.downloads {
 			if d.ID == msg.DownloadID {
-				target = d
+				d.Filename = msg.Filename
+				d.Total = msg.Total
+				d.URL = msg.URL
+				// Update the progress state with real total size
+				d.state.SetTotalSize(msg.Total)
+				// Start polling for this download
+				cmds = append(cmds, d.reporter.PollCmd())
 				break
 			}
-		}
-		if target != nil {
-			// Update existing download with real metadata
-			target.Filename = msg.Filename
-			target.Total = msg.Total
-			target.URL = msg.URL
-		} else {
-			// Should not happen if we optimistically added it, but fallback just in case
-			newDownload := NewDownloadModel(msg.DownloadID, msg.URL, msg.Filename, msg.Total)
-			m.downloads = append(m.downloads, newDownload)
 		}
 		cmds = append(cmds, listenForActivity(m.progressChan))
 
 	case messages.ProgressMsg:
+		// Progress from polling reporter
 		for _, d := range m.downloads {
 			if d.ID == msg.DownloadID {
 				d.Downloaded = msg.Downloaded
@@ -50,17 +46,29 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmd := d.progress.SetPercent(percentage)
 					cmds = append(cmds, cmd)
 				}
+				// Continue polling
+				cmds = append(cmds, d.reporter.PollCmd())
 				break
 			}
 		}
-		cmds = append(cmds, listenForActivity(m.progressChan))
+
+	case progressTickMsg:
+		// Internal tick - continue polling without UI update
+		for _, d := range m.downloads {
+			if d.ID == msg.downloadID && !d.done {
+				cmds = append(cmds, d.reporter.PollCmd())
+				break
+			}
+		}
 
 	case messages.DownloadCompleteMsg:
 		for _, d := range m.downloads {
 			if d.ID == msg.DownloadID {
-				d.Downloaded = d.Total // Ensure we show 100%
+				d.Downloaded = d.Total
 				d.Elapsed = msg.Elapsed
 				d.done = true
+				// Set progress to 100%
+				cmds = append(cmds, d.progress.SetPercent(1.0))
 				break
 			}
 		}
@@ -76,13 +84,9 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, listenForActivity(m.progressChan))
 
-	case messages.TickMsg:
-		cmds = append(cmds, tickCmd())
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Re-focus inputs to trigger resize if needed (though inputs don't strictly need it here)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -158,12 +162,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// filename := m.inputs[2].Value() // Will use later
 				m.state = DashboardState
 
-				// Optimistically add download
+				// Create download with state and reporter
 				nextID := len(m.downloads) + 1
 				newDownload := NewDownloadModel(nextID, url, "Resolving...", 0)
 				m.downloads = append(m.downloads, newDownload)
 
-				return m, StartDownloadCmd(m.progressChan, nextID, url, path)
+				return m, StartDownloadCmd(m.progressChan, nextID, url, path, newDownload.state)
 			}
 
 			// Up/Down navigation between inputs
@@ -200,7 +204,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func StartDownloadCmd(sub chan tea.Msg, id int, url, path string) tea.Cmd {
+func StartDownloadCmd(sub chan tea.Msg, id int, url, path string, state *downloader.ProgressState) tea.Cmd {
 	return func() tea.Msg {
 		d := downloader.NewDownloader()
 		d.SetProgressChan(sub)
@@ -209,9 +213,12 @@ func StartDownloadCmd(sub chan tea.Msg, id int, url, path string) tea.Cmd {
 		ctx := context.Background()
 
 		go func() {
-			err := d.Download(ctx, url, path, 1, false, "", "") // Concurrency restricted to 1 as per user request
+			err := d.Download(ctx, url, path, 1, false, "", "")
 			if err != nil {
+				state.SetError(err)
 				sub <- messages.DownloadErrorMsg{DownloadID: id, Err: err}
+			} else {
+				state.Done.Store(true)
 			}
 		}()
 

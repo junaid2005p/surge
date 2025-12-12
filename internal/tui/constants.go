@@ -5,7 +5,6 @@ import "time"
 const (
 	// Timeouts and Intervals
 	TickInterval = 200 * time.Millisecond
-
 	// Input Dimensions
 	InputWidth = 50
 
@@ -20,6 +19,6 @@ const (
 	// Units
 	Megabyte = 1024.0 * 1024.0
 
-	// Channel Buffers
-	ProgressChannelBuffer = 100
+	// Channel Buffers - reduced since only events use channel now
+	ProgressChannelBuffer = 16
 )

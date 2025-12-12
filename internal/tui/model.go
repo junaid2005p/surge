@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"surge/internal/messages"
+	"surge/internal/downloader"
 )
 
 type UIState int
@@ -32,6 +32,10 @@ type DownloadModel struct {
 
 	progress progress.Model
 
+	// Hybrid architecture: atomic state + polling reporter
+	state    *downloader.ProgressState
+	reporter *ProgressReporter
+
 	done bool
 	err  error
 }
@@ -43,14 +47,15 @@ type RootModel struct {
 	state        UIState
 	inputs       []textinput.Model
 	focusedInput int
-	progressChan chan tea.Msg // Single channel for all downloads
+	progressChan chan tea.Msg // Channel for events only (start/complete/error)
 
 	// Navigation
 	cursor int
 }
 
-// NewDownloadModel creates a new download model
+// NewDownloadModel creates a new download model with progress state and reporter
 func NewDownloadModel(id int, url string, filename string, total int64) *DownloadModel {
+	state := downloader.NewProgressState(id, total)
 	return &DownloadModel{
 		ID:        id,
 		URL:       url,
@@ -58,6 +63,8 @@ func NewDownloadModel(id int, url string, filename string, total int64) *Downloa
 		Total:     total,
 		StartTime: time.Now(),
 		progress:  progress.New(progress.WithDefaultGradient()),
+		state:     state,
+		reporter:  NewProgressReporter(state),
 	}
 }
 
@@ -89,20 +96,11 @@ func InitialRootModel() RootModel {
 }
 
 func (m RootModel) Init() tea.Cmd {
-	return tea.Batch(
-		tickCmd(),
-		listenForActivity(m.progressChan),
-	)
+	return listenForActivity(m.progressChan)
 }
 
 func listenForActivity(sub chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		return <-sub
 	}
-}
-
-func tickCmd() tea.Cmd {
-	return tea.Tick(TickInterval, func(_ time.Time) tea.Msg {
-		return messages.TickMsg{}
-	})
 }
