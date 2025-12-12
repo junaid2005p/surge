@@ -1,0 +1,5 @@
+- Pausing downloads
+- Duplicate downloads
+- Implement filename in TUI
+- add filters/sort by in TUI?
+- better colors in TUI?
