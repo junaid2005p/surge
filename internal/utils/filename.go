@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"strings"
+
 	"github.com/h2non/filetype"
 	"github.com/vfaronov/httpheader"
 )
@@ -23,14 +25,40 @@ func DetermineFilename(rawurl string, resp *http.Response, verbose bool) (string
 		return "", nil, err
 	}
 
-	filename := filepath.Base(parsed.Path)
+	// Changing flow to determine candidate filename first
 
+	var candidate string
+
+	// 1. Content-Disposition
 	if _, name, err := httpheader.ContentDisposition(resp.Header); err == nil && name != "" {
-		filename = filepath.Base(name)
+		candidate = name
 		if verbose {
-			fmt.Fprintf(os.Stderr, "Filename from Content-Disposition: %s\n", filename)
+			fmt.Fprintf(os.Stderr, "Filename from Content-Disposition: %s\n", candidate)
 		}
 	}
+
+	// 2. Query Parameters (if no Content-Disposition)
+	if candidate == "" {
+		q := parsed.Query()
+		if name := q.Get("filename"); name != "" {
+			candidate = name
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Filename from query param 'filename': %s\n", candidate)
+			}
+		} else if name := q.Get("file"); name != "" {
+			candidate = name
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Filename from query param 'file': %s\n", candidate)
+			}
+		}
+	}
+
+	// 3. URL Path
+	if candidate == "" {
+		candidate = filepath.Base(parsed.Path)
+	}
+
+	filename := sanitizeFilename(candidate)
 
 	header := make([]byte, 512)
 	n, rerr := io.ReadFull(resp.Body, header)
@@ -89,4 +117,23 @@ func DetermineFilename(rawurl string, resp *http.Response, verbose bool) (string
 	}
 
 	return filename, body, nil
+}
+
+func sanitizeFilename(name string) string {
+	name = filepath.Base(name)
+	if name == "." || name == "/" {
+		return name
+	}
+	name = strings.TrimSpace(name)
+	name = strings.ReplaceAll(name, "\\", "_")
+	name = strings.ReplaceAll(name, "/", "_")
+	// Additional standard replacements for windows/linux safety
+	name = strings.ReplaceAll(name, ":", "_")
+	name = strings.ReplaceAll(name, "*", "_")
+	name = strings.ReplaceAll(name, "?", "_")
+	name = strings.ReplaceAll(name, "\"", "_")
+	name = strings.ReplaceAll(name, "<", "_")
+	name = strings.ReplaceAll(name, ">", "_")
+	name = strings.ReplaceAll(name, "|", "_")
+	return name
 }
