@@ -205,6 +205,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if msg.String() == "/" {
+				// Enter search mode
+				m.searchQuery = ""
+				m.state = SearchState
+				return m, nil
+			}
 
 			// Navigation with viewport scroll adjustment
 			if msg.String() == "up" || msg.String() == "k" {
@@ -490,6 +496,30 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.state = DashboardState
 				return m, nil
+			}
+			return m, nil
+
+		case SearchState:
+			if msg.String() == "esc" {
+				// Exit search, clear query
+				m.searchQuery = ""
+				m.state = DashboardState
+				return m, nil
+			}
+			if msg.String() == "enter" {
+				// Keep filter active, return to dashboard
+				m.state = DashboardState
+				return m, nil
+			}
+			if msg.String() == "backspace" {
+				if len(m.searchQuery) > 0 {
+					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+				}
+				return m, nil
+			}
+			// Accept printable characters
+			if len(msg.String()) == 1 {
+				m.searchQuery += msg.String()
 			}
 			return m, nil
 		}

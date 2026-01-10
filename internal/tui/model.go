@@ -22,6 +22,7 @@ const (
 	FilePickerState                      //FilePickerState is 3
 	HistoryState                         //HistoryState is 4
 	DuplicateWarningState                //DuplicateWarningState is 5
+	SearchState                          //SearchState is 6
 )
 
 // StartDownloadMsg is sent from the HTTP server to start a new download
@@ -83,6 +84,9 @@ type RootModel struct {
 	pendingPath     string // Path pending confirmation
 	pendingFilename string // Filename pending confirmation
 	duplicateInfo   string // Info about the duplicate
+
+	// Search
+	searchQuery string // Current search filter
 }
 
 // NewDownloadModel creates a new download model with progress state and reporter

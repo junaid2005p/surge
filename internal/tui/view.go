@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"surge/internal/utils"
@@ -162,7 +163,6 @@ func (m RootModel) View() string {
 		warningContent := lipgloss.JoinVertical(lipgloss.Center,
 			lipgloss.NewStyle().Foreground(ColorWarning).Bold(true).Render("⚠ DUPLICATE DETECTED"),
 			"",
-			fmt.Sprintf("A download with this URL already exists:"),
 			lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render(truncateString(m.duplicateInfo, 50)),
 			"",
 			lipgloss.NewStyle().Foreground(ColorSubtext).Render("[C] Continue  [F] Focus Existing  [X] Cancel"),
@@ -174,6 +174,60 @@ func (m RootModel) View() string {
 				BorderForeground(ColorWarning).
 				Padding(1, 3).
 				Render(warningContent),
+		)
+	}
+
+	if m.state == SearchState {
+		// Full-screen search with filtered downloads
+		w := m.width - HeaderWidthOffset
+		if w < 0 {
+			w = 0
+		}
+
+		// Search input box
+		searchBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorSecondary).
+			Padding(0, 1).
+			Width(w - 4).
+			Render(fmt.Sprintf("Search: %s_", m.searchQuery))
+
+		// Filter downloads by search query
+		var filtered []*DownloadModel
+		query := strings.ToLower(m.searchQuery)
+		for _, d := range m.downloads {
+			if query == "" || strings.Contains(strings.ToLower(d.Filename), query) || strings.Contains(strings.ToLower(d.URL), query) {
+				filtered = append(filtered, d)
+			}
+		}
+
+		// Render filtered cards
+		var cards []string
+		for i, d := range filtered {
+			if i >= 5 { // Limit to 5 results for performance
+				break
+			}
+			cards = append(cards, renderCard(d, false, w-ProgressBarWidthOffset))
+		}
+
+		if len(filtered) == 0 && m.searchQuery != "" {
+			cards = append(cards, lipgloss.NewStyle().Foreground(ColorSubtext).Padding(2, 0).Render("No downloads match your search."))
+		}
+
+		listContent := lipgloss.JoinVertical(lipgloss.Left, cards...)
+		resultInfo := fmt.Sprintf("Showing %d of %d downloads", len(filtered), len(m.downloads))
+		if len(filtered) > 5 {
+			resultInfo = fmt.Sprintf("Showing 5 of %d matches", len(filtered))
+		}
+
+		return lipgloss.JoinVertical(lipgloss.Left,
+			searchBox,
+			"",
+			lipgloss.NewStyle().Foreground(ColorSubtext).Render(resultInfo),
+			"",
+			listContent,
+			"",
+			lipgloss.NewStyle().Foreground(ColorSubtext).Padding(0, 1).Render("[Enter] Apply Filter  [Esc] Cancel"),
 		)
 	}
 
@@ -260,7 +314,7 @@ func (m RootModel) View() string {
 		header,
 		listContent,
 		"",
-		lipgloss.NewStyle().Foreground(ColorSubtext).Padding(0, 1).Render("[g] Add  [h] History  [p] Pause/Resume  [d] Delete  [Enter] Details  [q] Quit"+scrollInfo),
+		lipgloss.NewStyle().Foreground(ColorSubtext).Padding(0, 1).Render("[g] Add  [/] Search  [h] History  [p] Pause  [d] Delete  [q] Quit"+scrollInfo),
 	)
 }
 
