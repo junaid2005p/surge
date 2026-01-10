@@ -127,29 +127,70 @@ func (m RootModel) View() string {
 		Render(headerContent)
 
 	// --- SECTION 2: SPEED GRAPH (Top Right) ---
-	// Render the Sparkline (account for borders: 2 for left/right border, 2 for padding)
-	graphContentWidth := rightWidth - 4
+	// Calculate dimensions
+	// We reserve space for the axis labels on the left (e.g., " 10.5 MB/s")
+	axisWidth := 12
+	graphContentWidth := rightWidth - 4 - axisWidth
 	if graphContentWidth < 10 {
 		graphContentWidth = 10
 	}
-	graphContentHeight := topHeight - 4
-	if graphContentHeight < 2 {
-		graphContentHeight = 2
-	}
-	graphContent := renderSparkline(m.SpeedHistory, graphContentWidth, graphContentHeight)
 
-	// Get current speed
+	// Determine Max Speed for the Axis
+	maxSpeed := 1.0 // Prevent divide by zero
+	for _, v := range m.SpeedHistory {
+		if v > maxSpeed {
+			maxSpeed = v
+		}
+	}
+
+	// Render the Sparkline
+	graphVisual := renderSparkline(m.SpeedHistory, graphContentWidth, maxSpeed)
+
+	// Create the Axis (Left side)
+	// We use a vertical join to place Max at top and 0 at bottom
+	// We use the same height as the graph visual
+	axisStyle := lipgloss.NewStyle().Width(axisWidth).Foreground(ColorGray).Align(lipgloss.Right)
+
+	axisTop := axisStyle.Render(fmt.Sprintf("%.1f MB/s ", maxSpeed))
+	axisBottom := axisStyle.Render("0.0 MB/s ")
+
+	// Create a filler for the space between Top and Bottom labels
+	// We assume a fixed height for visual balance (or calculate based on topHeight)
+	// topHeight is usually 9. Subtract borders (2) and padding (2) ~ 5 lines usable
+	spacerHeight := topHeight - 6
+	if spacerHeight < 0 {
+		spacerHeight = 0
+	}
+	spacer := strings.Repeat("\n", spacerHeight)
+
+	axisColumn := lipgloss.JoinVertical(lipgloss.Right,
+		axisTop,
+		spacer,
+		axisBottom,
+	)
+
+	// Combine Axis and Graph
+	// We wrap the graph in a style to align it with the axis text if needed
+	fullGraphRow := lipgloss.JoinHorizontal(lipgloss.Top,
+		axisColumn,
+		lipgloss.NewStyle().MarginLeft(1).Render(graphVisual),
+	)
+
+	// Get current speed for the title/overlay
 	currentSpeed := 0.0
 	if len(m.SpeedHistory) > 0 {
 		currentSpeed = m.SpeedHistory[len(m.SpeedHistory)-1]
 	}
-	currentSpeedStr := fmt.Sprintf("%.2f MB/s", currentSpeed)
+	currentSpeedStr := fmt.Sprintf("Current: %.2f MB/s", currentSpeed)
 
+	// Final Assembly for the box
 	speedContent := lipgloss.JoinVertical(lipgloss.Right,
-		graphContent,
 		lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render(currentSpeedStr),
+		"", // Spacer
+		fullGraphRow,
 	)
-	graphBox := renderBtopBox("Speed", speedContent, rightWidth, topHeight, ColorNeonCyan, false)
+
+	graphBox := renderBtopBox("Network Activity", speedContent, rightWidth, topHeight, ColorNeonCyan, false)
 
 	// --- SECTION 3: DOWNLOAD LIST (Bottom Left) ---
 	// Tab Bar
@@ -166,10 +207,10 @@ func (m RootModel) View() string {
 		listContent = m.list.View()
 	}
 
-	listInner := lipgloss.JoinVertical(lipgloss.Left,
+	listInner := lipgloss.NewStyle().Padding(1, 2).Render(lipgloss.JoinVertical(lipgloss.Left,
 		tabBar,
 		listContent,
-	)
+	))
 	listBox := renderBtopBox("Downloads", listInner, leftWidth, bottomHeight, ColorNeonPink, true)
 
 	// --- SECTION 4: DETAILS PANE (Bottom Right) ---
@@ -221,7 +262,7 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 	}
 	d.progress.Width = progressWidth
 	progView := d.progress.ViewAs(pct)
-	pctStr := fmt.Sprintf("%.0f%%", pct*100)
+	// pctStr was previously used for explicit percentage display
 
 	// Consistent content width for centering
 	contentWidth := w - 6
@@ -244,14 +285,10 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 		Foreground(ColorNeonCyan).
 		Bold(true).
 		Render("PROGRESS")
-	progressPct := lipgloss.NewStyle().
-		Foreground(ColorNeonPink).
-		Bold(true).
-		Render(pctStr)
+	// progressPct was previously used for explicit percentage display
 	progressHeader := lipgloss.JoinHorizontal(lipgloss.Top,
 		progressLabel,
-		lipgloss.NewStyle().Width(contentWidth-lipgloss.Width(progressLabel)-lipgloss.Width(progressPct)).Render(""),
-		progressPct,
+		lipgloss.NewStyle().Width(contentWidth-lipgloss.Width(progressLabel)).Render(""),
 	)
 	progressSection := lipgloss.JoinVertical(lipgloss.Left,
 		progressHeader,
@@ -312,55 +349,55 @@ func getDownloadStatus(d *DownloadModel) string {
 }
 
 // Simple Sparkline Generator using Braille patterns
-func renderSparkline(data []float64, w, h int) string {
-	if len(data) == 0 {
-		return ""
-	}
-
-	// Find max for scaling
-	max := 0.0
-	for _, v := range data {
-		if v > max {
-			max = v
-		}
-	}
-	if max == 0 {
-		max = 1
-	}
-
+func renderSparkline(data []float64, w int, maxVal float64) string {
 	// Braille characters
 	// distinct levels: ' ', '⡀', '⣀', '⣄', '⣤', '⣦', '⣶', '⣷', '⣿'
 	levels := []rune{' ', '⡀', '⣀', '⣄', '⣤', '⣦', '⣶', '⣷', '⣿'}
 
-	// Sample the data to fit width
-	// We want to show the latest data at the right
-	// If we have more pixels (w) than data, we stretch? No, sparklines usually just show available data.
-
-	// Actually, let's just map data points to character columns.
-	// We have 40 history points, width might be ~60 chars.
-
 	var s strings.Builder
 
-	// Ensure we don't go out of bounds
-	startIndex := 0
+	// 1. Calculate how many points we can actually show
+	// If we have less data than width, we show all data.
+	// If we have more data than width, we slice the end.
+	var visibleData []float64
 	if len(data) > w {
-		startIndex = len(data) - w
+		visibleData = data[len(data)-w:]
+	} else {
+		visibleData = data
 	}
 
-	visibleData := data[startIndex:]
+	// 2. Padding (The Fix for "Starting in Middle")
+	// If we have fewer data points than width, fill the START with spaces
+	// so the graph grows from the right side.
+	padding := w - len(visibleData)
+	if padding > 0 {
+		s.WriteString(strings.Repeat(" ", padding))
+	}
 
+	// 3. Render the bars
 	for _, val := range visibleData {
-		levelIdx := int((val / max) * float64(len(levels)-1))
+		// Normalize value between 0 and 1 based on maxVal
+		normalized := val / maxVal
+
+		// Map to level index
+		levelIdx := int(normalized * float64(len(levels)-1))
+
+		// Clamp index
 		if levelIdx < 0 {
 			levelIdx = 0
 		}
 		if levelIdx >= len(levels) {
 			levelIdx = len(levels) - 1
 		}
+
+		// Edge case: If val is > 0 but calculated index is 0 (very small number),
+		// bump it to 1 so we at least see a dot.
+		if val > 0 && levelIdx == 0 {
+			levelIdx = 1
+		}
+
 		s.WriteRune(levels[levelIdx])
 	}
-	// Fill remaining width if any (pad left)
-	// But usually we just return what we have
 
 	return lipgloss.NewStyle().Foreground(ColorNeonPink).Render(s.String())
 }
