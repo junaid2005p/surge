@@ -128,9 +128,10 @@ func (m RootModel) View() string {
 
 	// --- SECTION 2: SPEED GRAPH (Top Right) ---
 	// Calculate dimensions
-	// We reserve space for the axis labels on the left (e.g., " 10.5 MB/s")
 	axisWidth := 12
-	graphContentWidth := rightWidth - 4 - axisWidth
+	// Use -3 (Left Border + Right Border + Margin) 
+	// This ensures it fills the box tight against the right side
+	graphContentWidth := rightWidth - axisWidth - 3 
 	if graphContentWidth < 10 {
 		graphContentWidth = 10
 	}
@@ -142,35 +143,57 @@ func (m RootModel) View() string {
 			maxSpeed = v
 		}
 	}
+	// Add a little headroom (10%) so the graph doesn't always hit the ceiling
+	maxSpeed = maxSpeed * 1.1
 
-	// Render the Sparkline
-	graphVisual := renderSparkline(m.SpeedHistory, graphContentWidth, maxSpeed)
+	// Calculate Available Height for the Graph
+	// topHeight (9) - Borders (2) - Title/Spacer lines (2)
+	// Title/Speed takes 1 line, Spacer takes 1 line.
+	graphHeight := topHeight - 4 
+	if graphHeight < 1 { 
+		graphHeight = 1 
+	}
+
+	// Render the Graph (Multi-line)
+	graphVisual := renderMultiLineGraph(m.SpeedHistory, graphContentWidth, graphHeight, maxSpeed, ColorNeonPink)
 
 	// Create the Axis (Left side)
-	// We use a vertical join to place Max at top and 0 at bottom
-	// We use the same height as the graph visual
 	axisStyle := lipgloss.NewStyle().Width(axisWidth).Foreground(ColorGray).Align(lipgloss.Right)
+	
+	// Create Axis Labels
+	labelTop := axisStyle.Render(fmt.Sprintf("%.1f MB/s ", maxSpeed))
+	labelMid := axisStyle.Render(fmt.Sprintf("%.1f MB/s ", maxSpeed/2))
+	labelBot := axisStyle.Render("0.0 MB/s ")
 
-	axisTop := axisStyle.Render(fmt.Sprintf("%.1f MB/s ", maxSpeed))
-	axisBottom := axisStyle.Render("0.0 MB/s ")
-
-	// Create a filler for the space between Top and Bottom labels
-	// We assume a fixed height for visual balance (or calculate based on topHeight)
-	// topHeight is usually 9. Subtract borders (2) and padding (2) ~ 5 lines usable
-	spacerHeight := topHeight - 6
-	if spacerHeight < 0 {
-		spacerHeight = 0
+	// Build the axis column to match graphHeight exactly
+	var axisColumn string
+	
+	if graphHeight >= 5 {
+		// If we have enough space, show Top, Middle, Bottom
+		// Distribute spaces evenly
+		spacesTotal := graphHeight - 3 // 3 labels
+		spaceTop := spacesTotal / 2
+		spaceBot := spacesTotal - spaceTop
+		
+		axisColumn = lipgloss.JoinVertical(lipgloss.Right,
+			labelTop,
+			strings.Repeat("\n", spaceTop),
+			labelMid,
+			strings.Repeat("\n", spaceBot),
+			labelBot,
+		)
+	} else {
+		// Compact mode: just Top and Bottom
+		spaces := graphHeight - 2
+		if spaces < 0 { spaces = 0 }
+		axisColumn = lipgloss.JoinVertical(lipgloss.Right,
+			labelTop,
+			strings.Repeat("\n", spaces),
+			labelBot,
+		)
 	}
-	spacer := strings.Repeat("\n", spacerHeight)
-
-	axisColumn := lipgloss.JoinVertical(lipgloss.Right,
-		axisTop,
-		spacer,
-		axisBottom,
-	)
 
 	// Combine Axis and Graph
-	// We wrap the graph in a style to align it with the axis text if needed
 	fullGraphRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		axisColumn,
 		lipgloss.NewStyle().MarginLeft(1).Render(graphVisual),
@@ -186,7 +209,7 @@ func (m RootModel) View() string {
 	// Final Assembly for the box
 	speedContent := lipgloss.JoinVertical(lipgloss.Right,
 		lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render(currentSpeedStr),
-		"", // Spacer
+		"", // Spacer line
 		fullGraphRow,
 	)
 
@@ -199,9 +222,10 @@ func (m RootModel) View() string {
 	// Render the bubbles list or centered empty message
 	var listContent string
 	if len(m.list.Items()) == 0 {
-		// Center "No downloads" like the right pane
-		listContentHeight := bottomHeight - 6 // Account for tab bar and borders
-		listContent = lipgloss.Place(leftWidth-4, listContentHeight, lipgloss.Center, lipgloss.Center,
+		// FIX: Reduced width (leftWidth-8) to account for padding (4) and borders (2) + safety
+		// preventing the "floating bits" wrap-around artifact.
+		listContentHeight := bottomHeight - 6 
+		listContent = lipgloss.Place(leftWidth-8, listContentHeight, lipgloss.Center, lipgloss.Center,
 			lipgloss.NewStyle().Foreground(ColorNeonCyan).Render("No downloads"))
 	} else {
 		listContent = m.list.View()
@@ -348,58 +372,91 @@ func getDownloadStatus(d *DownloadModel) string {
 	}
 }
 
-// Simple Sparkline Generator using Braille patterns
-func renderSparkline(data []float64, w int, maxVal float64) string {
-	// Braille characters
-	// distinct levels: ' ', '⡀', '⣀', '⣄', '⣤', '⣦', '⣶', '⣷', '⣿'
-	levels := []rune{' ', '⡀', '⣀', '⣄', '⣤', '⣦', '⣶', '⣷', '⣿'}
+func renderMultiLineGraph(data []float64, width, height int, maxVal float64, color lipgloss.Color) string {
+	if width < 1 || height < 1 {
+		return ""
+	}
 
-	var s strings.Builder
+	// Styles
+	gridStyle := lipgloss.NewStyle().Foreground(ColorGray) // Faint color for lines
+	barStyle := lipgloss.NewStyle().Foreground(color)      // Bright color for data
 
-	// 1. Calculate how many points we can actually show
-	// If we have less data than width, we show all data.
-	// If we have more data than width, we slice the end.
+	// 1. Prepare the canvas with a Grid
+	rows := make([][]string, height)
+	for i := range rows {
+		rows[i] = make([]string, width)
+		for j := range rows[i] {
+			// Draw horizontal lines on every other row (or every row if you prefer)
+			// Using "╌" gives a nice technical dashed look. "─" is a solid line.
+			if i%2 == 0 { 
+				rows[i][j] = gridStyle.Render("╌") 
+			} else {
+				rows[i][j] = " "
+			}
+		}
+	}
+
+	// 2. Slice data to fit width
 	var visibleData []float64
-	if len(data) > w {
-		visibleData = data[len(data)-w:]
+	if len(data) > width {
+		visibleData = data[len(data)-width:]
 	} else {
+		// If not enough data, we process what we have.
+		// We do NOT pad with 0s here, because we want the grid 
+		// to show through on the left side.
 		visibleData = data
 	}
 
-	// 2. Padding (The Fix for "Starting in Middle")
-	// If we have fewer data points than width, fill the START with spaces
-	// so the graph grows from the right side.
-	padding := w - len(visibleData)
-	if padding > 0 {
-		s.WriteString(strings.Repeat(" ", padding))
+	// Block characters
+	blocks := []string{" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	// 3. Draw Data Columns
+	// We calculate the offset so data fills from the RIGHT
+	offset := width - len(visibleData)
+
+	for x, val := range visibleData {
+		// Actual X position on the canvas
+		canvasX := offset + x 
+		
+		if val < 0 { val = 0 }
+
+		// Calculate height in "sub-blocks"
+		pct := val / maxVal
+		if pct > 1.0 { pct = 1.0 }
+		totalSubBlocks := pct * float64(height) * 8.0
+
+		// Fill rows from bottom up
+		for y := 0; y < height; y++ {
+			rowIndex := height - 1 - y // 0 is top, height-1 is bottom
+			
+			// Calculate block value for this specific row
+			rowValue := totalSubBlocks - float64(y*8)
+
+			var char string
+			if rowValue <= 0 {
+				// No data for this height? Keep the grid background!
+				continue 
+			} else if rowValue >= 8 {
+				char = "█"
+			} else {
+				char = blocks[int(rowValue)]
+			}
+			
+			// Overwrite the grid with the data bar
+			rows[rowIndex][canvasX] = barStyle.Render(char)
+		}
 	}
 
-	// 3. Render the bars
-	for _, val := range visibleData {
-		// Normalize value between 0 and 1 based on maxVal
-		normalized := val / maxVal
-
-		// Map to level index
-		levelIdx := int(normalized * float64(len(levels)-1))
-
-		// Clamp index
-		if levelIdx < 0 {
-			levelIdx = 0
+	// 4. Join rows
+	var s strings.Builder
+	for i, row := range rows {
+		s.WriteString(strings.Join(row, ""))
+		if i < height-1 {
+			s.WriteRune('\n')
 		}
-		if levelIdx >= len(levels) {
-			levelIdx = len(levels) - 1
-		}
-
-		// Edge case: If val is > 0 but calculated index is 0 (very small number),
-		// bump it to 1 so we at least see a dot.
-		if val > 0 && levelIdx == 0 {
-			levelIdx = 1
-		}
-
-		s.WriteRune(levels[levelIdx])
 	}
 
-	return lipgloss.NewStyle().Foreground(ColorNeonPink).Render(s.String())
+	return s.String()
 }
 
 func (m RootModel) calcTotalSpeed() float64 {
