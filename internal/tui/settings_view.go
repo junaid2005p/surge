@@ -4,18 +4,55 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"surge/internal/config"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// SettingsKeyMap defines the keybindings for the settings view
+type SettingsKeyMap struct {
+	Edit  key.Binding
+	Reset key.Binding
+	Tabs  key.Binding
+	Save  key.Binding
+}
+
+var SettingsKeys = SettingsKeyMap{
+	Edit: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "edit"),
+	),
+	Reset: key.NewBinding(
+		key.WithKeys("r", "R"),
+		key.WithHelp("r", "reset"),
+	),
+	Tabs: key.NewBinding(
+		key.WithKeys("1", "2", "3", "4"),
+		key.WithHelp("1-4", "tabs"),
+	),
+	Save: key.NewBinding(
+		key.WithKeys("esc"),
+		key.WithHelp("esc", "save"),
+	),
+}
+
+// ShortHelp returns keybindings to show in the mini help view
+func (k SettingsKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Edit, k.Reset, k.Tabs, k.Save}
+}
+
+// FullHelp returns keybindings for the expanded help view
+func (k SettingsKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{k.Edit, k.Reset, k.Tabs, k.Save}}
+}
 
 // viewSettings renders the Btop-style settings page
 func (m RootModel) viewSettings() string {
 	// Fixed smaller size for settings modal
-	width := 70
+	width := 90
 	height := 18
 	if m.width < width+4 {
 		width = m.width - 4
@@ -48,8 +85,8 @@ func (m RootModel) viewSettings() string {
 	settingsValues := m.getSettingsValues(currentCategory)
 
 	// Calculate column widths
-	leftWidth := 24
-	rightWidth := width - leftWidth - 5
+	leftWidth := 26
+	rightWidth := width - leftWidth - 6
 
 	// === LEFT COLUMN: Settings List (names only) ===
 	var listLines []string
@@ -72,19 +109,15 @@ func (m RootModel) viewSettings() string {
 	}
 
 	listContent := lipgloss.JoinVertical(lipgloss.Left, listLines...)
-	listBox := lipgloss.NewStyle().
-		Width(leftWidth).
-		Render(listContent)
 
-	// === VERTICAL SEPARATOR ===
-	separatorHeight := len(settingsMeta)
-	var separatorLines []string
-	for i := 0; i < separatorHeight; i++ {
-		separatorLines = append(separatorLines, "│")
-	}
-	separator := lipgloss.NewStyle().
-		Foreground(ColorGray).
-		Render(strings.Join(separatorLines, "\n"))
+	// Wrap list in a bordered box
+	listBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorGray).
+		Width(leftWidth).
+		PaddingLeft(1).
+		PaddingRight(1).
+		Render(listContent)
 
 	// === RIGHT COLUMN: Value + Description ===
 	var rightContent string
@@ -118,7 +151,7 @@ func (m RootModel) viewSettings() string {
 			Render(valueLabel + valueStr)
 
 		descDisplay := lipgloss.NewStyle().
-			Foreground(ColorGray).
+			Foreground(ColorLightGray).
 			Width(rightWidth - 2).
 			Render(meta.Description)
 
@@ -131,12 +164,10 @@ func (m RootModel) viewSettings() string {
 		Render(rightContent)
 
 	// === COMBINE COLUMNS ===
-	content := lipgloss.JoinHorizontal(lipgloss.Top, listBox, separator, rightBox)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, listBox, rightBox)
 
-	// === HELP TEXT ===
-	helpText := lipgloss.NewStyle().
-		Foreground(ColorGray).
-		Render("[Enter] Edit [R] Reset [1-4] Tab [Esc] Save")
+	// === HELP TEXT using Bubbles help ===
+	helpText := m.help.View(SettingsKeys)
 
 	// === FINAL ASSEMBLY ===
 	fullContent := lipgloss.JoinVertical(lipgloss.Left,
