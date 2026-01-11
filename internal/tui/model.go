@@ -46,6 +46,7 @@ type DownloadModel struct {
 	ID          int
 	URL         string
 	Filename    string
+	Destination string // Full path to the destination file
 	Total       int64
 	Downloaded  int64
 	Speed       float64

@@ -371,15 +371,6 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 		pct = float64(d.Downloaded) / float64(d.Total)
 	}
 
-	// Progress bar with margins
-	progressWidth := w - 12
-	if progressWidth < 20 {
-		progressWidth = 20
-	}
-	d.progress.Width = progressWidth
-	progView := d.progress.ViewAs(pct)
-	// pctStr was previously used for explicit percentage display
-
 	// Consistent content width for centering
 	contentWidth := w - 6
 
@@ -388,14 +379,119 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 		Foreground(ColorGray).
 		Render(strings.Repeat("─", contentWidth))
 
-	// File info section - compact layout
-	fileInfo := lipgloss.JoinVertical(lipgloss.Left,
+	// File info section - always shown
+	fileInfoLines := []string{
 		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Filename:"), StatsValueStyle.Render(truncateString(d.Filename, contentWidth-14))),
 		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Status:"), StatsValueStyle.Render(getDownloadStatus(d))),
-		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Size:"), StatsValueStyle.Render(fmt.Sprintf("%s / %s", utils.ConvertBytesToHumanReadable(d.Downloaded), utils.ConvertBytesToHumanReadable(d.Total)))),
+		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Filepath:"), StatsValueStyle.Render(truncateString(d.Destination, contentWidth-14))),
+	}
+
+	// Size display differs based on completed status
+	if d.done {
+		fileInfoLines = append(fileInfoLines,
+			lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Size:"), StatsValueStyle.Render(utils.ConvertBytesToHumanReadable(d.Total))),
+		)
+	} else {
+		fileInfoLines = append(fileInfoLines,
+			lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Size:"), StatsValueStyle.Render(fmt.Sprintf("%s / %s", utils.ConvertBytesToHumanReadable(d.Downloaded), utils.ConvertBytesToHumanReadable(d.Total)))),
+		)
+	}
+
+	fileInfo := lipgloss.JoinVertical(lipgloss.Left, fileInfoLines...)
+
+	// URL section - always shown
+	urlSection := lipgloss.JoinHorizontal(lipgloss.Left,
+		StatsLabelStyle.Render("URL:"),
+		lipgloss.NewStyle().Foreground(ColorLightGray).Render(truncateString(d.URL, contentWidth-14)),
 	)
 
-	// Progress section - compact
+	// For completed downloads, show simplified view
+	if d.done {
+		// Calculate average speed for completed download
+		var avgSpeedStr string
+		if d.Elapsed.Seconds() > 0 {
+			avgSpeed := float64(d.Total) / d.Elapsed.Seconds()
+			avgSpeedStr = fmt.Sprintf("%.2f MB/s", avgSpeed/Megabyte)
+		} else {
+			avgSpeedStr = "N/A"
+		}
+
+		statsSection := lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Time Taken:"), StatsValueStyle.Render(d.Elapsed.Round(time.Second).String())),
+			lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Avg Speed:"), StatsValueStyle.Render(avgSpeedStr)),
+		)
+
+		content := lipgloss.JoinVertical(lipgloss.Left,
+			"",
+			fileInfo,
+			"",
+			divider,
+			"",
+			statsSection,
+			"",
+			divider,
+			"",
+			urlSection,
+		)
+
+		return lipgloss.NewStyle().
+			Padding(0, 2).
+			Render(content)
+	}
+
+	// For paused/queued downloads, show simplified view without ETA/Speed/Conns
+	if d.paused || d.Speed == 0 {
+		// Progress bar
+		progressWidth := w - 12
+		if progressWidth < 20 {
+			progressWidth = 20
+		}
+		d.progress.Width = progressWidth
+		progView := d.progress.ViewAs(pct)
+
+		progressLabel := lipgloss.NewStyle().
+			Foreground(ColorNeonCyan).
+			Bold(true).
+			Render("Progress")
+		progressSection := lipgloss.JoinVertical(lipgloss.Left,
+			progressLabel,
+			"",
+			lipgloss.NewStyle().MarginLeft(1).Render(progView),
+		)
+
+		// Elapsed time for paused downloads
+		elapsedSection := lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Elapsed:"), StatsValueStyle.Render(d.Elapsed.Round(time.Second).String()))
+
+		content := lipgloss.JoinVertical(lipgloss.Left,
+			"",
+			fileInfo,
+			divider,
+			"",
+			progressSection,
+			"",
+			divider,
+			"",
+			elapsedSection,
+			"",
+			divider,
+			"",
+			urlSection,
+		)
+
+		return lipgloss.NewStyle().
+			Padding(0, 2).
+			Render(content)
+	}
+
+	// For active downloads, show full view with progress, ETA, speed, connections
+	// Progress bar with margins
+	progressWidth := w - 12
+	if progressWidth < 20 {
+		progressWidth = 20
+	}
+	d.progress.Width = progressWidth
+	progView := d.progress.ViewAs(pct)
+
 	progressLabel := lipgloss.NewStyle().
 		Foreground(ColorNeonCyan).
 		Bold(true).
@@ -406,29 +502,37 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 		lipgloss.NewStyle().MarginLeft(1).Render(progView),
 	)
 
-	// Stats section
+	// Calculate ETA
+	var etaStr string
+	if d.Speed > 0 && d.Total > 0 {
+		remaining := d.Total - d.Downloaded
+		etaSeconds := float64(remaining) / d.Speed
+		etaDuration := time.Duration(etaSeconds) * time.Second
+		etaStr = etaDuration.Round(time.Second).String()
+	} else {
+		etaStr = "∞"
+	}
+
+	// Stats section with ETA
 	statsSection := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Speed:"), StatsValueStyle.Render(fmt.Sprintf("%.2f MB/s", d.Speed/Megabyte))),
+		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("ETA:"), StatsValueStyle.Render(etaStr)),
 		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Conns:"), StatsValueStyle.Render(fmt.Sprintf("%d", d.Connections))),
 		lipgloss.JoinHorizontal(lipgloss.Left, StatsLabelStyle.Render("Elapsed:"), StatsValueStyle.Render(d.Elapsed.Round(time.Second).String())),
 	)
 
-	// URL section
-	urlSection := lipgloss.JoinHorizontal(lipgloss.Left,
-		StatsLabelStyle.Render("URL:"),
-		lipgloss.NewStyle().Foreground(ColorLightGray).Render(truncateString(d.URL, contentWidth-14)),
-	)
-
-	// Combine all sections - dense layout with dividers
+	// Combine all sections
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		"",
 		fileInfo,
 		divider,
 		"",
 		progressSection,
+		"",
 		divider,
 		"",
 		statsSection,
+		"",
 		divider,
 		"",
 		urlSection,

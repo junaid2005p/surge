@@ -33,6 +33,7 @@ type DownloadStartedMsg struct {
 	URL        string
 	Filename   string
 	Total      int64
+	DestPath   string // Full path to the destination file
 }
 
 type DownloadPausedMsg struct {
