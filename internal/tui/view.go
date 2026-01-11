@@ -157,12 +157,8 @@ func (m RootModel) View() string {
 	// Use 60 data points for 30 seconds of history (2 samples per second / 0.5s interval)
 	const graphHistoryPoints = 60
 
-	// Stats box takes ~20 chars width, graph takes the rest
-	statsBoxWidth := 20
-	graphContentWidth := rightWidth - statsBoxWidth - 6 // borders + spacing
-	if graphContentWidth < 20 {
-		graphContentWidth = 20
-	}
+	// Stats box width inside the Network Activity box
+	statsBoxWidth := 18
 
 	// Get the last 60 data points for the graph
 	var graphData []float64
@@ -210,9 +206,42 @@ func (m RootModel) View() string {
 		totalDownloaded += d.Downloaded
 	}
 
-	// Render the Graph (no stats overlay - stats go in separate box)
-	axisWidth := 6
-	graphVisual := renderMultiLineGraph(graphData, graphContentWidth-axisWidth-1, graphContentHeight, maxSpeed, ColorNeonPink, nil)
+	// Create stats content (left side inside box)
+	speedMbps := currentSpeed * 8
+	topMbps := topSpeed * 8
+
+	valueStyle := lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true)
+	labelStyleStats := lipgloss.NewStyle().Foreground(ColorLightGray)
+	dimStyle := lipgloss.NewStyle().Foreground(ColorGray)
+
+	statsContent := lipgloss.JoinVertical(lipgloss.Left,
+		fmt.Sprintf("%s %s", valueStyle.Render("▼"), valueStyle.Render(fmt.Sprintf("%.2f MB/s", currentSpeed))),
+		dimStyle.Render(fmt.Sprintf("  (%.0f Mbps)", speedMbps)),
+		"",
+		fmt.Sprintf("%s %s", labelStyleStats.Render("Top:"), valueStyle.Render(fmt.Sprintf("%.2f", topSpeed))),
+		dimStyle.Render(fmt.Sprintf("  (%.0f Mbps)", topMbps)),
+		"",
+		fmt.Sprintf("%s %s", labelStyleStats.Render("Total:"), valueStyle.Render(formatBytes(totalDownloaded))),
+	)
+
+	// Style stats with a border box
+	statsBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorGray).
+		Padding(0, 1).
+		Width(statsBoxWidth).
+		Height(graphContentHeight)
+	statsBox := statsBoxStyle.Render(statsContent)
+
+	// Graph takes remaining width after stats box
+	axisWidth := 5
+	graphAreaWidth := rightWidth - statsBoxWidth - axisWidth - 6 // borders + spacing
+	if graphAreaWidth < 10 {
+		graphAreaWidth = 10
+	}
+
+	// Render the Graph
+	graphVisual := renderMultiLineGraph(graphData, graphAreaWidth, graphContentHeight, maxSpeed, ColorNeonPink, nil)
 
 	// Create Y-axis (right side of graph)
 	axisStyle := lipgloss.NewStyle().Width(axisWidth).Foreground(ColorGray).Align(lipgloss.Right)
@@ -244,35 +273,15 @@ func (m RootModel) View() string {
 		)
 	}
 
-	// Combine graph + axis (axis on right)
+	// Combine: stats box (left) | graph (middle) | axis (right)
 	graphWithAxis := lipgloss.JoinHorizontal(lipgloss.Top,
+		statsBox,
 		graphVisual,
 		axisColumn,
 	)
 
-	// Create stats box content
-	speedMbps := currentSpeed * 8
-	topMbps := topSpeed * 8
-
-	valueStyle := lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true)
-	labelStyleStats := lipgloss.NewStyle().Foreground(ColorLightGray)
-	dimStyle := lipgloss.NewStyle().Foreground(ColorGray)
-
-	statsContent := lipgloss.JoinVertical(lipgloss.Left,
-		fmt.Sprintf("%s %s", valueStyle.Render("▼"), valueStyle.Render(fmt.Sprintf("%.2f MB/s", currentSpeed))),
-		dimStyle.Render(fmt.Sprintf("  (%.0f Mbps)", speedMbps)),
-		"",
-		fmt.Sprintf("%s %s", labelStyleStats.Render("▼ Top:"), valueStyle.Render(fmt.Sprintf("%.2f MB/s", topSpeed))),
-		dimStyle.Render(fmt.Sprintf("  (%.0f Mbps)", topMbps)),
-		"",
-		fmt.Sprintf("%s %s", labelStyleStats.Render("▼ Total:"), valueStyle.Render(formatBytes(totalDownloaded))),
-	)
-
-	// Render graph and stats boxes side by side
-	graphInnerBox := renderBtopBox("Network Activity", graphWithAxis, rightWidth-statsBoxWidth-1, graphHeight, ColorNeonCyan, false)
-	statsInnerBox := renderBtopBox("Stats", statsContent, statsBoxWidth, graphHeight, ColorNeonCyan, false)
-
-	graphBox := lipgloss.JoinHorizontal(lipgloss.Top, graphInnerBox, statsInnerBox)
+	// Render single network activity box containing stats + graph
+	graphBox := renderBtopBox("Network Activity", graphWithAxis, rightWidth, graphHeight, ColorNeonCyan, false)
 
 	// --- SECTION 3: DOWNLOAD LIST (Bottom Left) ---
 	// Tab Bar
