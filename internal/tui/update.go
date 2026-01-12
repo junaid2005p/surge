@@ -393,8 +393,6 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if !dl.done && dl.Destination != "" {
 							// Delete the .surge partial file
 							_ = os.Remove(dl.Destination + downloader.IncompleteSuffix)
-							// Also try to delete the destination in case it exists
-							_ = os.Remove(dl.Destination)
 						}
 
 						// Remove from list
@@ -670,7 +668,10 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case DuplicateWarningState:
 			if msg.String() == "c" || msg.String() == "C" {
-				// Continue anyway - add the download
+				// Continue anyway - add the download with modified filename
+				// Generate unique filename by appending (1), (2), etc.
+				uniqueFilename := m.generateUniqueFilename(m.pendingFilename)
+
 				nextID := uuid.New().String()
 				newDownload := NewDownloadModel(nextID, m.pendingURL, "Queued", 0)
 				m.downloads = append(m.downloads, newDownload)
@@ -679,7 +680,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					URL:        m.pendingURL,
 					OutputPath: m.pendingPath,
 					ID:         nextID,
-					Filename:   m.pendingFilename,
+					Filename:   uniqueFilename,
 					Verbose:    false,
 					ProgressCh: m.progressChan,
 					State:      newDownload.state,
@@ -853,4 +854,41 @@ func (m *RootModel) updateListTitle() {
 	case TabDone:
 		m.list.Title = "✅ Completed"
 	}
+}
+
+// generateUniqueFilename creates a unique filename by appending (1), (2), etc.
+// if the filename already exists in the current downloads list
+func (m *RootModel) generateUniqueFilename(filename string) string {
+	if filename == "" {
+		return filename // Let the downloader auto-detect
+	}
+
+	// Check if any download already has this filename
+	exists := func(name string) bool {
+		for _, d := range m.downloads {
+			if d.Filename == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !exists(filename) {
+		return filename
+	}
+
+	// Split filename into base and extension
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+
+	// Try (1), (2), etc. until we find a unique one
+	for i := 1; i <= 100; i++ {
+		candidate := fmt.Sprintf("%s(%d)%s", base, i, ext)
+		if !exists(candidate) {
+			return candidate
+		}
+	}
+
+	// Fallback: just return original (shouldn't happen)
+	return filename
 }
