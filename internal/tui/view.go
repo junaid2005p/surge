@@ -97,6 +97,26 @@ func (m RootModel) View() string {
 		)
 	}
 
+	if m.state == ExtensionConfirmationState {
+		confirmationContent := lipgloss.JoinVertical(lipgloss.Center,
+			lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true).Render("EXTENSION DOWNLOAD"),
+			"",
+			lipgloss.NewStyle().Render("Do you want to add this download?"),
+			"",
+			lipgloss.NewStyle().Foreground(ColorNeonPurple).Bold(true).Render(truncateString(m.pendingURL, 50)),
+			"",
+			lipgloss.NewStyle().Foreground(ColorLightGray).Render("[Y] Yes  [N] No"),
+		)
+
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(ColorNeonCyan).
+				Padding(1, 4).
+				Render(confirmationContent),
+		)
+	}
+
 	// === MAIN DASHBOARD LAYOUT ===
 
 	availableHeight := m.height - 2 // Margin

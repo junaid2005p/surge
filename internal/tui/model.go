@@ -22,14 +22,15 @@ import (
 type UIState int //Defines UIState as int to be used in rootModel
 
 const (
-	DashboardState        UIState = iota //DashboardState is 0 increments after each line
-	InputState                           //InputState is 1
-	DetailState                          //DetailState is 2
-	FilePickerState                      //FilePickerState is 3
-	HistoryState                         //HistoryState is 4
-	DuplicateWarningState                //DuplicateWarningState is 5
-	SearchState                          //SearchState is 6
-	SettingsState                        //SettingsState is 7
+	DashboardState             UIState = iota //DashboardState is 0 increments after each line
+	InputState                                //InputState is 1
+	DetailState                               //DetailState is 2
+	FilePickerState                           //FilePickerState is 3
+	HistoryState                              //HistoryState is 4
+	DuplicateWarningState                     //DuplicateWarningState is 5
+	SearchState                               //SearchState is 6
+	SettingsState                             //SettingsState is 7
+	ExtensionConfirmationState                //ExtensionConfirmationState is 8
 )
 
 const (

@@ -75,6 +75,15 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			path = "."
 		}
 
+		// Check if extension prompt is enabled
+		if m.Settings.General.ExtensionPrompt {
+			m.pendingURL = msg.URL
+			m.pendingPath = path
+			m.pendingFilename = msg.Filename
+			m.state = ExtensionConfirmationState
+			return m, nil
+		}
+
 		// Check for duplicate URL in active downloads (if warning enabled)
 		if m.Settings.General.WarnOnDuplicate {
 			normalizedInputURL := strings.TrimRight(msg.URL, "/")
@@ -709,6 +718,52 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
+				m.state = DashboardState
+				return m, nil
+			}
+			return m, nil
+
+		case ExtensionConfirmationState:
+			if msg.String() == "y" || msg.String() == "Y" {
+				// Confirmed - proceed to add (checking for duplicates first)
+				if m.Settings.General.WarnOnDuplicate {
+					normalizedInputURL := strings.TrimRight(m.pendingURL, "/")
+					for _, d := range m.downloads {
+						normalizedExistingURL := strings.TrimRight(d.URL, "/")
+						if normalizedExistingURL == normalizedInputURL {
+							utils.Debug("Duplicate download detected after confirmation: %s", m.pendingURL)
+							m.duplicateInfo = d.Filename
+							m.state = DuplicateWarningState
+							return m, nil
+						}
+					}
+				}
+
+				// No duplicate (or warning disabled) - add to queue
+				nextID := uuid.New().String()
+				newDownload := NewDownloadModel(nextID, m.pendingURL, "Queued", 0)
+				m.downloads = append(m.downloads, newDownload)
+
+				cfg := downloader.DownloadConfig{
+					URL:        m.pendingURL,
+					OutputPath: m.pendingPath,
+					ID:         nextID,
+					Filename:   m.pendingFilename,
+					Verbose:    false,
+					ProgressCh: m.progressChan,
+					State:      newDownload.state,
+					Runtime:    convertRuntimeConfig(m.Settings.ToRuntimeConfig()),
+				}
+
+				utils.Debug("Adding download from extension (confirmed): %s", m.pendingURL)
+				m.Pool.Add(cfg)
+
+				m.state = DashboardState
+				m.UpdateListItems()
+				return m, nil
+			}
+			if msg.String() == "n" || msg.String() == "N" || msg.String() == "esc" {
+				// Cancelled
 				m.state = DashboardState
 				return m, nil
 			}

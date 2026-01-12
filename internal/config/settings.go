@@ -61,7 +61,7 @@ func GetSettingsMetadata() map[string][]SettingMeta {
 		"General": {
 			{Key: "default_download_dir", Label: "Default Download Dir", Description: "Default directory for new downloads. Leave empty to use current directory.", Type: "string"},
 			{Key: "warn_on_duplicate", Label: "Warn on Duplicate", Description: "Show warning when adding a download that already exists.", Type: "bool"},
-			{Key: "extension_prompt", Label: "Extension Prompt", Description: "Prompt to confirm file extension on ambiguous files.", Type: "bool"},
+			{Key: "extension_prompt", Label: "Extension Prompt", Description: "Prompt for confirmation when adding downloads via browser extension.", Type: "bool"},
 			{Key: "auto_resume", Label: "Auto Resume", Description: "Automatically resume paused downloads on startup.", Type: "bool"},
 		},
 		"Connections": {
@@ -108,7 +108,7 @@ func DefaultSettings() *Settings {
 			AutoResume:         false,
 		},
 		Connections: ConnectionSettings{
-			MaxConnectionsPerHost: 64,
+			MaxConnectionsPerHost: 32,
 			MaxGlobalConnections:  100,
 			UserAgent:             "", // Empty means use default UA
 		},
@@ -120,9 +120,9 @@ func DefaultSettings() *Settings {
 		},
 		Performance: PerformanceSettings{
 			MaxTaskRetries:        3,
-			SlowWorkerThreshold:   0.50,
+			SlowWorkerThreshold:   0.3,
 			SlowWorkerGracePeriod: 5 * time.Second,
-			StallTimeout:          5 * time.Second,
+			StallTimeout:          3 * time.Second,
 			SpeedEmaAlpha:         0.3,
 		},
 	}
