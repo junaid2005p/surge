@@ -70,7 +70,7 @@ func (m RootModel) View() string {
 
 		paddedContent := lipgloss.NewStyle().Padding(0, 2).Render(pickerContent)
 
-		box := renderBtopBox(PaneTitleStyle.Render(" Select Directory "), "", paddedContent, 80, 20, ColorNeonPink)
+		box := renderBtopBox(PaneTitleStyle.Render(" Select Directory "), "", paddedContent, 90, 20, ColorNeonPink)
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 	}

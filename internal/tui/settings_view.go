@@ -146,6 +146,7 @@ func (m RootModel) viewSettings() string {
 
 	// === FINAL ASSEMBLY ===
 	fullContent := lipgloss.JoinVertical(lipgloss.Left,
+		"",
 		tabBar,
 		"",
 		content,
