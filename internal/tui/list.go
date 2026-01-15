@@ -42,7 +42,7 @@ func (i DownloadItem) Description() string {
 		status = "Paused"
 		stateColor = ColorStatePaused // 🟡 Orange
 	case d.Speed == 0 && d.Downloaded == 0:
-		statusIcon = "⏳"
+		statusIcon = "⋯"
 		status = "Queued"
 		stateColor = ColorStatePaused // 🟡 Orange
 	default:

@@ -460,6 +460,11 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 		lipgloss.NewStyle().Foreground(ColorLightGray).Render(truncateString(d.URL, contentWidth-14)),
 	)
 
+	IDSection := lipgloss.JoinHorizontal(lipgloss.Left,
+		StatsLabelStyle.Render("ID:"),
+		lipgloss.NewStyle().Foreground(ColorLightGray).Render(d.ID),
+	)
+
 	// For errored downloads, show error details
 	if d.err != nil {
 		errorStyle := lipgloss.NewStyle().Foreground(ColorStateError).Width(contentWidth - 4)
@@ -486,6 +491,7 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 			divider,
 			"",
 			urlSection,
+			IDSection,
 		)
 
 		return lipgloss.NewStyle().
@@ -521,6 +527,7 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 			divider,
 			"",
 			urlSection,
+			IDSection,
 		)
 
 		return lipgloss.NewStyle().
@@ -566,6 +573,7 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 			divider,
 			"",
 			urlSection,
+			IDSection,
 		)
 
 		return lipgloss.NewStyle().
@@ -627,6 +635,7 @@ func renderFocusedDetails(d *DownloadModel, w int) string {
 		divider,
 		"",
 		urlSection,
+		IDSection,
 	)
 
 	// Wrap in a container with reduced padding
