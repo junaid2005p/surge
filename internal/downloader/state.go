@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"surge/internal/config"
 )
+
+// masterListMu protects concurrent access to the master list file
+var masterListMu sync.Mutex
 
 // URLHash returns a short hash of the URL for master list keying
 // This is used for tracking completed downloads by URL
@@ -197,6 +201,9 @@ func SaveMasterList(list *MasterList) error {
 
 // AddToMasterList adds or updates a download entry in the master list
 func AddToMasterList(entry DownloadEntry) error {
+	masterListMu.Lock()
+	defer masterListMu.Unlock()
+
 	list, err := LoadMasterList()
 	if err != nil {
 		list = &MasterList{Downloads: []DownloadEntry{}}
@@ -227,6 +234,9 @@ func AddToMasterList(entry DownloadEntry) error {
 // RemoveFromMasterList removes a download entry from the master list
 // Uses stateHash for unique identification (falls back to URLHash for legacy entries)
 func RemoveFromMasterList(id string) error {
+	masterListMu.Lock()
+	defer masterListMu.Unlock()
+
 	list, err := LoadMasterList()
 	if err != nil {
 		return nil // Nothing to remove
