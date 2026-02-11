@@ -215,9 +215,10 @@ func (ps *ProgressState) SetChunkProgress(progress []int64) {
 	copy(ps.ChunkProgress, progress)
 }
 
-// SetChunkState sets the 2-bit state for a specific chunk index
+// setChunkState sets the 2-bit state for a specific chunk index
 // State: 0=Pending, 1=Downloading, 2=Completed
-func (ps *ProgressState) SetChunkState(index int, status ChunkStatus) {
+// Note: This method must be called with ps.mu held.
+func (ps *ProgressState) setChunkState(index int, status ChunkStatus) {
 	if index < 0 || index >= ps.BitmapWidth {
 		return
 	}
@@ -234,8 +235,9 @@ func (ps *ProgressState) SetChunkState(index int, status ChunkStatus) {
 	ps.ChunkBitmap[byteIndex] |= val
 }
 
-// GetChunkState gets the 2-bit state for a specific chunk index
-func (ps *ProgressState) GetChunkState(index int) ChunkStatus {
+// getChunkState gets the 2-bit state for a specific chunk index
+// Note: This method must be called with ps.mu held.
+func (ps *ProgressState) getChunkState(index int) ChunkStatus {
 	if index < 0 || index >= ps.BitmapWidth {
 		return ChunkPending
 	}
@@ -247,7 +249,16 @@ func (ps *ProgressState) GetChunkState(index int) ChunkStatus {
 	return ChunkStatus(val)
 }
 
+// GetChunkState gets the 2-bit state for a specific chunk index safely (acquires lock)
+func (ps *ProgressState) GetChunkState(index int) ChunkStatus {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	return ps.getChunkState(index)
+}
+
 // UpdateChunkStatus updates the bitmap based on byte range
+// Note: ChunkCompleted status implies that 'length' bytes were written and should be added to progress.
+// ChunkDownloading status only updates the state bit if not already completed.
 func (ps *ProgressState) UpdateChunkStatus(offset, length int64, status ChunkStatus) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
@@ -314,18 +325,18 @@ func (ps *ProgressState) UpdateChunkStatus(offset, length int64, status ChunkSta
 
 			if ps.ChunkProgress[i] >= (chunkEnd - chunkStart) {
 				ps.ChunkProgress[i] = chunkEnd - chunkStart // clamp
-				ps.SetChunkState(i, ChunkCompleted)
+				ps.setChunkState(i, ChunkCompleted)
 				// utils.Debug("Chunk %d completed (size=%d)", i, ps.ChunkProgress[i])
 			} else {
 				// Partial progress -> Downloading
-				if ps.GetChunkState(i) != ChunkCompleted {
-					ps.SetChunkState(i, ChunkDownloading)
+				if ps.getChunkState(i) != ChunkCompleted {
+					ps.setChunkState(i, ChunkDownloading)
 				}
 			}
 		case ChunkDownloading:
-			current := ps.GetChunkState(i)
+			current := ps.getChunkState(i)
 			if current != ChunkCompleted {
-				ps.SetChunkState(i, ChunkDownloading)
+				ps.setChunkState(i, ChunkDownloading)
 			}
 		}
 	}
@@ -407,13 +418,13 @@ func (ps *ProgressState) RecalculateProgress(remainingTasks []Task) {
 
 		if ps.ChunkProgress[i] >= chunkSize {
 			ps.ChunkProgress[i] = chunkSize // clamp
-			ps.SetChunkState(i, ChunkCompleted)
+			ps.setChunkState(i, ChunkCompleted)
 		} else if ps.ChunkProgress[i] > 0 {
 			// Even if saved bitmap said Pending, if we have bytes, it's actually partial
-			ps.SetChunkState(i, ChunkDownloading)
+			ps.setChunkState(i, ChunkDownloading)
 		} else {
 			ps.ChunkProgress[i] = 0 // clamp
-			ps.SetChunkState(i, ChunkPending)
+			ps.setChunkState(i, ChunkPending)
 		}
 	}
 }
