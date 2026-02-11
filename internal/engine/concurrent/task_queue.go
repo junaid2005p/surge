@@ -58,9 +58,12 @@ func (q *TaskQueue) Pop() (types.Task, bool) {
 	t := q.tasks[q.head]
 	q.head++
 	if q.head > len(q.tasks)/2 {
-
-		// slice instead of copy to avoid allocation
-		q.tasks = q.tasks[q.head:]
+		// Compact the array to free up memory from processed tasks
+		// Allocate a new slice and copy remaining elements
+		remaining := len(q.tasks) - q.head
+		newTasks := make([]types.Task, remaining)
+		copy(newTasks, q.tasks[q.head:])
+		q.tasks = newTasks
 		q.head = 0
 	}
 	return t, true

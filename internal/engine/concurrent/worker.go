@@ -227,8 +227,10 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 	var pendingBytes int64
 	var pendingStart int64 = -1
 	lastUpdate := time.Now()
-	const batchSizeThreshold = 256 * 1024 // 256KB
-	const batchTimeThreshold = 100 * time.Millisecond
+	// Optimizing batch thresholds to reduce lock contention on global state
+	// We want to update total progress atomically (fast) but only lock for chunk map (slow) occasionally
+	const batchSizeThreshold = 1024 * 1024 // 1MB
+	const batchTimeThreshold = 500 * time.Millisecond
 
 	// Helper to flush pending updates to global state
 	flushUpdates := func() {
@@ -236,8 +238,8 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 			// Update Chunk Map (Global Lock)
 			d.State.UpdateChunkStatus(pendingStart, pendingBytes, types.ChunkCompleted)
 
-			// Update Downloaded Counter (Atomic)
-			d.State.Downloaded.Add(pendingBytes)
+			// Note: Downloaded counter is updated immediately in the loop below
+			// to keep the total progress bar smooth.
 
 			pendingBytes = 0
 			pendingStart = -1
@@ -318,6 +320,11 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 
 			// Calculate effective contribution (clamping to StopAt is done above via readSoFar truncation)
 			// So readSoFar is exactly what we wrote and what we "own"
+
+			// IMMEDIATE: Update total downloaded (Atomic) - keeps global progress bar smooth
+			if d.State != nil {
+				d.State.Downloaded.Add(int64(readSoFar))
+			}
 
 			if pendingStart == -1 {
 				pendingStart = rangeStart
