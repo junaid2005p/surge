@@ -227,7 +227,7 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 	var pendingBytes int64
 	var pendingStart int64 = -1
 	lastUpdate := time.Now()
-	const batchSizeThreshold = 256 * 1024 // 256KB
+	const batchSizeThreshold = 2 * 1024 * 1024 // 2MB
 	const batchTimeThreshold = 100 * time.Millisecond
 
 	// Helper to flush pending updates to global state
