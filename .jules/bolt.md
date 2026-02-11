@@ -1,0 +1,3 @@
+## 2025-05-18 - [Optimizing Worker Lock Contention]
+**Learning:** Frequent updates to shared state (even if batched) can cause significant lock contention in highly concurrent systems (32+ workers). Batching updates by size (1MB) AND time (500ms) is crucial. Increasing batch size alone is insufficient if the time threshold triggers prematurely on fast connections.
+**Action:** When optimizing concurrent loops, calculate the expected frequency of lock acquisition based on both data rate and time interval. Ensure both thresholds are tuned for the target performance profile (e.g., high-speed downloads).
