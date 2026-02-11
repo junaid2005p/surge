@@ -585,7 +585,7 @@ func (m *RootModel) resetSettingToDefault(category, key string, defaults *config
 		}
 
 	case "Network":
-		// Check both connections and Network keys
+		// Handle Network-related keys
 		switch key {
 		case "max_connections_per_host":
 			m.Settings.Network.MaxConnectionsPerHost = defaults.Network.MaxConnectionsPerHost

@@ -54,7 +54,7 @@ func TestDefaultSettings(t *testing.T) {
 	})
 
 	// Verify Chunk settings
-	t.Run("ChunkSettings", func(t *testing.T) {
+	t.Run("NetworkChunkSettings", func(t *testing.T) {
 		if settings.Network.MinChunkSize <= 0 {
 			t.Errorf("MinChunkSize should be positive, got: %d", settings.Network.MinChunkSize)
 		}
